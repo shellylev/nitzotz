@@ -1,5 +1,5 @@
 // Service worker: קודם מנסה רשת (כדי לקבל עדכונים), ובלי רשת – מהזיכרון.
-const CACHE = 'nitzotz-v1';
+const CACHE = 'nitzotz-v2';
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/store.js', 'js/config.js',

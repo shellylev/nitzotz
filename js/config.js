@@ -32,6 +32,7 @@ export const VITAMIN_SLOTS = [
 export const WATER = {
   goalMl: 1500,
   cupMl: 330,
+  otherSizes: [150, 250, 500, 750],
   // שעות היום הפעילות – לחישוב "איפה אני אמורה להיות עכשיו"
   dayStartHour: 8,
   dayEndHour: 21,

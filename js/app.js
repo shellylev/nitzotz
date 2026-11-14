@@ -10,7 +10,54 @@ const ui = {
   key: S.todayKey(),
   weekKey: S.weekStart(S.todayKey()),
   settings: false,
+  waterMore: false,
 };
+
+const BACKUP_OPTIONS = [
+  { days: 0, label: 'כבוי' },
+  { days: 1, label: 'כל יום' },
+  { days: 3, label: 'כל 3 ימים' },
+  { days: 7, label: 'כל שבוע' },
+  { days: 14, label: 'כל שבועיים' },
+];
+
+function daysBetween(a, b) {
+  return Math.round((S.fromKey(b) - S.fromKey(a)) / 86400000);
+}
+
+function backupDue() {
+  const every = S.getSetting('backupEveryDays', 7);
+  if (!every) return false;
+  if (!S.hasData()) return false;
+  const last = S.getSetting('lastBackup', null) || S.getSetting('firstUse', null);
+  if (!last) { S.setSetting('firstUse', S.todayKey()); return false; }
+  const snooze = S.getSetting('backupSnooze', null);
+  if (snooze && snooze >= S.todayKey()) return false;
+  return daysBetween(last, S.todayKey()) >= every;
+}
+
+async function doBackup() {
+  const name = `nitzotz-backup-${S.todayKey()}.json`;
+  const blob = new Blob([S.exportData()], { type: 'application/json' });
+  const file = new File([blob], name, { type: 'application/json' });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      // באייפון: נפתח תפריט השיתוף → "שמירה בקבצים" (אפשר לבחור iCloud Drive)
+      await navigator.share({ files: [file], title: 'גיבוי ניצוץ' });
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
+    S.setSetting('lastBackup', S.todayKey());
+    render();
+    toast('הגיבוי נשמר 💾✨');
+  } catch (e) {
+    // ביטול תפריט השיתוף – לא עושים כלום
+  }
+}
 
 const root = document.getElementById('app');
 
@@ -107,6 +154,16 @@ function renderToday() {
       <button class="icon-btn nav" data-action="day-next" aria-label="יום הבא" ${isToday ? 'disabled' : ''}>‹</button>
     </div>`;
 
+  if (isToday && backupDue()) {
+    html += `<div class="banner">
+        💾 הגיע הזמן לגיבוי – לחיצה אחת ושמירה ב"קבצים" (אפשר ב-iCloud Drive).
+        <div class="row">
+          <button class="btn-soft" data-action="backup">גיבוי עכשיו</button>
+          <button class="btn-soft" data-action="backup-snooze">מחר</button>
+        </div>
+      </div>`;
+  }
+
   if (isToday) {
     const n = nextStep(key);
     html += n.done
@@ -145,9 +202,21 @@ function renderToday() {
         ${left === 0 ? 'הגעת ליעד! 💙' : left === 1 ? 'נשארה עוד כוס אחת' : `נשארו עוד ${left} כוסות`}
       </p>
       <div class="water-actions">
-        <button class="btn-minus" data-action="water-sub" aria-label="הורדת כוס">−</button>
+        <button class="btn-minus" data-action="water-sub" aria-label="ביטול ההוספה האחרונה">−</button>
         <button class="btn-water" data-action="water-add">+ כוס (${WATER.cupMl} מ״ל)</button>
+        <button class="btn-minus" data-action="water-more" aria-label="גודל אחר">${ui.waterMore ? '×' : '⋯'}</button>
       </div>
+      ${ui.waterMore ? `
+        <div class="water-more">
+          <div class="chips" style="justify-content:center">
+            ${WATER.otherSizes.map((ml) => `<button class="chip" data-action="water-add-ml" data-arg="${ml}">+ ${ml}</button>`).join('')}
+          </div>
+          <form class="water-custom" data-form="water">
+            <input type="number" inputmode="numeric" min="10" max="3000" step="10" placeholder="כמות אחרת" id="water-ml" />
+            <span class="muted">מ״ל</span>
+            <button class="btn-soft" type="submit">הוספה</button>
+          </form>
+        </div>` : ''}
     </section>`;
 
   // vitamins
@@ -173,7 +242,8 @@ function renderToday() {
   for (let i = 0; i < SADHANA_WEEKLY_GOAL; i++) dots += `<span class="dot ${i < weekN ? 'on' : ''}"></span>`;
   html += `
     <section class="card" id="sadhana">
-      <h2>🌸 סאדהנה <span class="count">${sadDone}/${SADHANA.length}</span></h2>
+      <h2>🌸 סאדהנה <span class="count">${sadDone}/${SADHANA.length}</span>
+        ${sadDone < SADHANA.length ? '<button class="btn-soft" data-action="sad-all">הכל ✓</button>' : ''}</h2>
       <div class="practice">${SADHANA.map((x) => `
         <button class="practice-item ${d.sadhana[x.id] ? 'on' : ''}" data-action="sad" data-arg="${x.id}">
           <span class="box">${d.sadhana[x.id] ? '✓' : ''}</span>${x.name}
@@ -270,11 +340,27 @@ function renderSettings() {
   return `<div class="overlay" data-action="close-settings">
     <section class="card sheet" data-stop>
       <h2>⚙️ הגדרות</h2>
-      <p class="muted">כרגע הנתונים נשמרים רק במכשיר הזה. מומלץ לשמור גיבוי מדי פעם.</p>
+      <p class="muted">כרגע הנתונים נשמרים רק במכשיר הזה.</p>
+
+      <h3 class="sub">💾 גיבוי לקובץ</h3>
+      <p class="muted">${S.getSetting('lastBackup', null)
+        ? `גיבוי אחרון: ${fmtDate(S.getSetting('lastBackup'))}` : 'עוד לא נשמר גיבוי לקובץ'}</p>
       <div class="row">
-        <button class="btn-soft" data-action="export">⬇️ שמירת גיבוי</button>
-        <label class="btn-soft" style="cursor:pointer">⬆️ שחזור מגיבוי
-          <input type="file" accept="application/json" id="import-file" hidden></label>
+        <button class="btn-soft" data-action="backup">⬇️ גיבוי עכשיו</button>
+        <label class="btn-soft" style="cursor:pointer">⬆️ שחזור מקובץ
+          <input type="file" accept="application/json,.json" id="import-file" hidden></label>
+      </div>
+      <p class="muted" style="margin-bottom:4px">תזכורת לגיבוי:</p>
+      <div class="chips">${BACKUP_OPTIONS.map((o) => `
+        <button class="chip ${S.getSetting('backupEveryDays', 7) === o.days ? 'on' : ''}"
+          data-action="backup-every" data-arg="${o.days}">${o.label}</button>`).join('')}
+      </div>
+
+      <h3 class="sub">🕰️ גיבוי אוטומטי במכשיר</h3>
+      <p class="muted">כל יום נשמר אוטומטית צילום מצב (14 הימים האחרונים). אפשר לחזור לאחד מהם אם משהו נמחק בטעות.</p>
+      <div class="chips">${S.listSnapshots().slice(0, 7).map((s) => `
+        <button class="chip" data-action="restore-snap" data-arg="${s.date}">${fmtDate(s.date)}</button>`).join('')
+        || '<span class="muted">עוד אין</span>'}
       </div>
       <div class="row" style="margin-top:16px"><button class="btn-main" data-action="close-settings">סגירה</button></div>
     </section></div>`;
@@ -338,6 +424,7 @@ function act(action, arg, ev) {
     case 'week-next': ui.weekKey = S.addDays(ui.weekKey, 7); break;
     case 'open-day': ui.key = arg; ui.view = 'today'; window.scrollTo(0, 0); break;
     case 'sad': positive = S.toggleSadhana(key, arg); break;
+    case 'sad-all': S.setSadhana(key, SADHANA.map((x) => x.id), true); positive = true; break;
     case 'vit': positive = S.toggleVitamin(key, arg); break;
     case 'slot-all': {
       const slot = VITAMIN_SLOTS.find((s) => s.id === arg);
@@ -346,19 +433,18 @@ function act(action, arg, ev) {
     case 'vit-all-day': S.setVitamins(key, ALL_VIT.map((i) => i.id), true); positive = true; break;
     case 'mark-logged': S.markDayLogged(key); toast('נרשם. מחר יום חדש 💜'); break;
     case 'water-add': S.addWater(key, WATER.cupMl); positive = true; break;
-    case 'water-sub': S.addWater(key, -WATER.cupMl); break;
+    case 'water-sub': S.undoWater(key, WATER.cupMl); break;
+    case 'water-more': ui.waterMore = !ui.waterMore; break;
+    case 'water-add-ml': S.addWater(key, Number(arg)); positive = true; break;
     case 'scroll': document.getElementById(arg)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return;
     case 'open-settings': ui.settings = true; break;
     case 'close-settings': ui.settings = false; break;
-    case 'export': {
-      const blob = new Blob([S.exportData()], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `nitzotz-backup-${S.todayKey()}.json`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      return;
-    }
+    case 'backup': doBackup(); return;
+    case 'backup-snooze': S.setSetting('backupSnooze', S.todayKey()); break;
+    case 'backup-every': S.setSetting('backupEveryDays', Number(arg)); break;
+    case 'restore-snap':
+      if (!confirm(`לחזור למצב של ${fmtDate(arg)}? מה שהוזן מאז יימחק.`)) return;
+      S.restoreSnapshot(arg); ui.settings = false; toast('שוחזר ✨'); break;
     default: return;
   }
 
@@ -380,6 +466,19 @@ document.addEventListener('click', (ev) => {
   if (!el || el.disabled) return;
   if (el.dataset.action === 'close-settings' && el.classList.contains('overlay') && ev.target !== el) return;
   act(el.dataset.action, el.dataset.arg, ev);
+});
+
+document.addEventListener('submit', (ev) => {
+  if (ev.target.dataset.form !== 'water') return;
+  ev.preventDefault();
+  const ml = Math.round(Number(document.getElementById('water-ml').value));
+  if (!ml || ml <= 0 || ml > 3000) { toast('כמות לא תקינה'); return; }
+  const before = (S.getDay(ui.key)?.waterMl) || 0;
+  S.addWater(ui.key, ml);
+  render();
+  const btn = document.querySelector('.btn-water').getBoundingClientRect();
+  sparkle(btn.left + btn.width / 2, btn.top + btn.height / 2);
+  if (before < WATER.goalMl && before + ml >= WATER.goalMl) toast('הגעת ליעד המים! 💧🎉');
 });
 
 document.addEventListener('change', async (ev) => {
@@ -405,7 +504,9 @@ document.addEventListener('visibilitychange', () => {
     if (ui.key === lastToday) ui.key = t;
     lastToday = t;
   }
+  S.takeDailySnapshot();
   render();
 });
 
+S.takeDailySnapshot();
 render();

@@ -37,6 +37,12 @@ export function toggleSadhana(key, id) {
   return d.sadhana[id];
 }
 
+export function setSadhana(key, ids, value) {
+  const d = ensureDay(key);
+  ids.forEach((id) => { d.sadhana[id] = value; });
+  save();
+}
+
 export function toggleVitamin(key, id) {
   const d = ensureDay(key);
   d.vitamins[id] = !d.vitamins[id];
@@ -52,14 +58,65 @@ export function setVitamins(key, ids, value) {
 
 export function addWater(key, ml) {
   const d = ensureDay(key);
-  d.waterMl = Math.max(0, (d.waterMl || 0) + ml);
+  d.waterMl = (d.waterMl || 0) + ml;
+  d.waterLog = [...(d.waterLog || []), ml];
   save();
+}
+
+// ביטול ההוספה האחרונה (בכל גודל שהיה)
+export function undoWater(key, fallbackMl) {
+  const d = ensureDay(key);
+  const log = d.waterLog || [];
+  const ml = log.length ? log[log.length - 1] : fallbackMl;
+  d.waterLog = log.slice(0, -1);
+  d.waterMl = Math.max(0, (d.waterMl || 0) - ml);
+  save();
+}
+
+// ---- הגדרות ----
+export function getSetting(name, fallback) {
+  return state.settings && name in state.settings ? state.settings[name] : fallback;
+}
+
+export function setSetting(name, value) {
+  state.settings = { ...(state.settings || {}), [name]: value };
+  save();
+}
+
+// ---- גיבויים אוטומטיים בתוך המכשיר ----
+// פעם ביום נשמר "צילום מצב" של כל הנתונים. נשמרים 14 האחרונים.
+const SNAP_KEY = 'nitzotz.snapshots';
+const SNAP_KEEP = 14;
+
+export function listSnapshots() {
+  try { return JSON.parse(localStorage.getItem(SNAP_KEY)) || []; } catch (e) { return []; }
+}
+
+export function takeDailySnapshot() {
+  const snaps = listSnapshots();
+  const today = todayKey();
+  if (snaps.length && snaps[0].date === today) return;
+  if (!Object.keys(state.days).length) return;
+  snaps.unshift({ date: today, data: state });
+  try { localStorage.setItem(SNAP_KEY, JSON.stringify(snaps.slice(0, SNAP_KEEP))); } catch (e) { /* ignore */ }
+}
+
+export function restoreSnapshot(date) {
+  const snap = listSnapshots().find((s) => s.date === date);
+  if (!snap) return false;
+  state = snap.data;
+  save();
+  return true;
 }
 
 // "סימנתי את היום" – יום שהוזן אבל בלי פעולות (למשל: לא עשיתי כלום, וזה בסדר)
 export function markDayLogged(key) {
   ensureDay(key);
   save();
+}
+
+export function hasData() {
+  return Object.keys(state.days).length > 0;
 }
 
 export function exportData() {
